@@ -52,8 +52,7 @@ def get_gradient_mask(perm_blocks, model_weights):
 
 def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activations_model_1, activations_model_2, ip_dim=1, separate_classifier=False, merging='perm_gradmask', num_classes=1000, rn_18=False):
 
-    # print(f"Working on {layer_name}")
-    
+
     l1 = get_attr(model1, layer_name.split('.'))
     l2 = get_attr(model2, layer_name.split('.'))
 
@@ -81,7 +80,6 @@ def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activati
         input_perms = perm_blocks[Axis(f"{layer_name}.weight", 1)]
         bi1, bi2, bi1c, bi2c = input_perms
     except KeyError:
-        # print(f"Key error on {layer_name}, ip shape - {ip1.shape}, weight_shape - {l1.weight.shape}")
 
         bi1, bi2, bi1c, bi2c = torch.arange(ip1.shape[1]), torch.arange(ip1.shape[1]), torch.tensor([]), torch.tensor([])    
 
@@ -94,7 +92,6 @@ def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activati
     i22 = ip2.index_select(ip_dim, bi2.int().to(ip1.device))
     i1c = ip1.index_select(ip_dim, bi1c.int().to(ip1.device))
     i2c = ip2.index_select(ip_dim, bi2c.int().to(ip1.device))
-    # print(i11.shape, i22.shape, i1c.shape, i2c.shape, len(bi1), len(bi2), len(bi1c), len(bi2c))
     o11 = acts_op_model1.index_select(ip_dim, bo1.int().to(ip1.device))
     o22 = acts_op_model2.index_select(ip_dim, bo2.int().to(ip1.device))
     o1c = acts_op_model1.index_select(ip_dim, bo1c.int().to(ip1.device))
