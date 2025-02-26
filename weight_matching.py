@@ -18,15 +18,9 @@ from utils import (
     tree_mean,
     
 )
-from compiler import PermutationProp
 from lsa_solvers import scipy_solve_lsa
 from activation_matching import cross_features_inner_product
 
-
-# TODO - rewrite this in the activation matching style
-# Might actually be straightforward, we just rewrite the original formulation
-# to take into account the partial merges
-# Might have to figure out how to deal with axes
 
 def weight_matching(
     spec: PermutationSpec,

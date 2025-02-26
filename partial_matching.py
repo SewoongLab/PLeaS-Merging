@@ -10,10 +10,25 @@ from gurobipy import GRB
 from torch.nn import Module
 
 
-from activation_matching import build_cross_module, compute_matching_costs, activation_matching, get_cross_module_progressive_merge, compute_progressive_matching_costs
 from lsa_solvers import scipy_solve_lsa
 from utils import Axis, Permutation, PermutationSpec, set_attr
-from torch.utils.data import DataLoader
+
+
+
+from collections.abc import Sequence
+from copy import copy, deepcopy
+from typing import Union
+
+from utils import (
+    Permutation,
+    PermutationSpec,
+    StateDict,
+    apply_perm,
+    make_identity_perm,  
+)
+from lsa_solvers import scipy_solve_lsa
+from activation_matching import cross_features_inner_product
+
 
 Ratios = Union[float, dict[Axis, float]]
 
@@ -30,9 +45,7 @@ def get_blocks(
     perm: Permutation,
     costs: dict[Axis, torch.Tensor],
     ratios: Ratios,
-    zero_augmented: bool = False,
     lsa_solver=scipy_solve_lsa,
-    logging=False,
 ) -> dict[Axis, tuple[torch.Tensor, ...]]:
     ratios = expand_ratios(spec, ratios)
     blocks = {}
@@ -43,53 +56,14 @@ def get_blocks(
             # Special case, makes life easier for me later
             P = torch.arange(len(P))
         C = costs[axis]
-        if zero_augmented:
-            # # Zero augmented activation matching
-            # Algorithm just adds a bunch of nodes with zero edges to the graph
-            # This forces the LSA matching to pick up the actual top-k edges to merge
-            n, _ = C.shape
-            dim_to_add = int(n * (ratios[axis]))
-            aug_C = torch.zeros((n + dim_to_add, n + dim_to_add)).to(C.device)
-            aug_C[:n, :n] = -C
-            aug_C[n:, n:] = 100000.
-            P_ = lsa_solver(aug_C, maximize=False)
-            P_ = P_[:n]  # Since we only care for the first n elements
-            P_ = P_.to(C.device)
-            Q_ = torch.arange(len(P_))
-            Q_ = Q_.to(C.device)
-            c_matched = aug_C[Q_, P_]
-            mask = c_matched > torch.quantile(c_matched, ratios[axis])
-            mask = mask.to(C.device)  # Mask contains the merged units
-            B_merged = P_[mask]
-            B_separate = torch.arange(n)
-            B_separate = torch.tensor([x for x in B_separate if x not in B_merged])
-            A_merged = Q_[mask]
-            A_separate = Q_[~mask]
-            blocks[axis] = A_merged.cuda(), B_merged.cuda(), A_separate.cuda(), B_separate.cuda(), 
-            
-            if logging:
-                P = P.to(C.device)
-                Q = torch.arange(len(P)).to(P.device)
-                c__matched = C[Q, P]
-                mask_ = c__matched > torch.quantile(c__matched, ratios[axis])
-                mask_ = mask_.to(C.device)
-
-                A_seperate_intersection = [x for x in A_separate if x in Q[~mask_]]
-                A_separate_union = torch.unique(torch.cat((Q[~mask_], A_separate)))
-                B_separate_intersection = [x for x in B_separate if x in P[~mask_]]
-                B_separate_union = torch.unique(torch.cat((P[~mask_].cuda(), B_separate.cuda())))
-                total_cost_new = c_matched[mask].sum()
-                total_cost_orig = -c__matched[mask_].sum()
-                print(f"Axis - {axis}, Non Merge ratio - {ratios[axis]}, New cost - {total_cost_new.item()}, Orig cost - {total_cost_orig.item()}, Cost ratio - {total_cost_new.item()/(total_cost_orig.item() + 1e-15)},IoU for A separate - {len(A_seperate_intersection)/ (len(A_separate_union)+1e-15)}, IoU for B separate - {len(B_separate_intersection)/ (len(B_separate_union)+1e-15)}")
-        else:
-            P = P.to(C.device)
-            Q = torch.arange(len(P)).to(P)
-            c_matched = C[Q, P]
-            mask = c_matched >= torch.quantile(c_matched, ratios[axis])  # Should I change this back to strict inequality?
-            # print(axis, len(P), len(Q), len(P[mask]), len(P[~mask]), len(Q[mask]), len(Q[~mask]), C.shape)
-            # four cases: merged and seperate for Q and P resp.
-            blocks[axis] = Q[mask].cuda(), P[mask].cuda(), Q[~mask].cuda(), P[~mask].cuda()
-            # print(axis, len(Q[mask]), len(P[mask]), len(Q[~mask]), len(P[~mask]), ratios[axis], len(P))
+        P = P.to(C.device)
+        Q = torch.arange(len(P)).to(P)
+        c_matched = C[Q, P]
+        mask = c_matched >= torch.quantile(c_matched, ratios[axis])  # Should I change this back to strict inequality?
+        # print(axis, len(P), len(Q), len(P[mask]), len(P[~mask]), len(Q[mask]), len(Q[~mask]), C.shape)
+        # four cases: merged and seperate for Q and P resp.
+        blocks[axis] = Q[mask].cuda(), P[mask].cuda(), Q[~mask].cuda(), P[~mask].cuda()
+        # print(axis, len(Q[mask]), len(P[mask]), len(Q[~mask]), len(P[~mask]), ratios[axis], len(P))
 
     return blocks
 
@@ -263,330 +237,6 @@ def qp_ratios(
                   for k, v in zip(spec, m.getVars())}
     return grb_ratios
 
-
-## CODE BELOW IS FOR PROGRESSIVE MERGING ##
-
-
-def build_progressive_merge_model(spec: PermutationSpec, model1: Module, model2: Module, merged_model: Module, blocks: dict[Axis, tuple[torch.Tensor, ...]], merged_layers: list[str]) -> Module:
-    # Takes two models along with a permutation spec and returns a module which is merged partially
-    # Permutation spec is a dict with 'layer' -> PermutationGroup (having node and state, state contains things which are actually permuted together)
-    blocks = copy(blocks)
-    for axis, pg in spec.items():
-        for ax in pg.state:
-            blocks[ax] = blocks[axis]
-
-    # blocks contained for each layer, which
-
-    axes_by_tensor = {}
-    for pg in spec.values():
-        for ax in pg.state:
-            axes_by_tensor.setdefault(ax.key, set()).add(ax.axis)
-
-    D1, D2, D3 = model1.state_dict(), model2.state_dict(), {}
-    DMerged = merged_model.state_dict()
-    for tensor_name, axes in axes_by_tensor.items():
-        W1, W2 = D1[tensor_name], D2[tensor_name]
-        assert len(axes) in {1, 2}
-
-        # Check if this was already merged
-        already_merged = '_'.join(tensor_name.split('.')[:-1]) in merged_layers  # Converting from parameter name to node name
-        print(tensor_name, already_merged)
-        if already_merged:
-            W3 = DMerged[tensor_name]
-        else:
-            if len(axes) == 1:
-                ax = next(iter(axes))
-                b1, b2, b1c, b2c = blocks[Axis(tensor_name, ax)]
-                
-                # I think this is incorrect, we may have to add something here
-                WMerged = DMerged[tensor_name]
-                # print(WMerged.shape, W1.shape, W2.shape, len(b1), len(b2), len(b1c), len(b2c))
-                
-                if 'fc.weight' in tensor_name:
-                    # Another hack to ensure that last layer has sufficient output size
-                    # Note that only for the last layer will the len of axes be 1
-                    W1 = WMerged[:, :WMerged.shape[1]//2]
-                    W2 = WMerged[:, WMerged.shape[1]//2:]
-                else:
-                    # This assumes that ax == 0
-                    # For ax = 1, we need to chunk along the appropriate dimension
-                    W1 = WMerged[:WMerged.shape[0]//2]
-                    W2 = WMerged[WMerged.shape[0]//2:]
-                
-                W1b = torch.index_select(W1, ax, b1)
-                W1bc = torch.index_select(W1, ax, b1c)
-                W2b = torch.index_select(W2, ax, b2)
-                W2bc = torch.index_select(W2, ax, b2c)
-                W3 = torch.cat(((W1b + W2b) / 2, W1bc, W2bc), ax)
-
-            elif len(axes) == 2:
-                # We assume 0 is output and 1 is input. (not tested)
-                # This will NOT work if the axes are flipped.
-                assert axes == {0, 1}
-                WMerged = DMerged[tensor_name]
-                # Inputs
-                bi1, bi2, bi1c, bi2c = blocks[Axis(tensor_name, 1)]
-                ni, mi = len(bi1), len(bi1c)
-
-
-                
-                if mi == WMerged.shape[1]:  # If the input is already merged
-                    W1 = WMerged[:WMerged.shape[0]//2, :]  # This works because output is not merged, else already_merged would be true
-                    W2 = WMerged[WMerged.shape[0]//2:, :]
-
-                    # This is a hack. What we want to say is that the input is already merged
-                    # Hence, we need to share the same input for both the conv operations
-                    # There should be a more principled way to do this via ratios passed to get_blocks
-                    # But here, I just swap the separate and merged things, to make it work
-                    bi1, bi1c = bi1c, bi1
-                    bi2, bi2c = bi1, bi1c
-                    ni, mi = mi, ni
-                    
-                else:
-                    W1 = WMerged[:WMerged.shape[0]//2, :WMerged.shape[1]//2]
-                    W2 = WMerged[WMerged.shape[0]//2:, WMerged.shape[1]//2:]
-                    
-                si12, si1, si2 = (
-                    slice(0, ni),
-                    slice(ni, ni + mi),
-                    slice(ni + mi, ni + 2 * mi),
-                )
-
-                # Outputs
-                bo1, bo2, bo1c, bo2c = blocks[Axis(tensor_name, 0)]
-                no, mo = len(bo1), len(bo1c)
-                so12, so1, so2 = (
-                    slice(0, no),
-                    slice(no, no + mo),
-                    slice(no + mo, no + 2 * mo),
-                )
-
-                # target block matrix
-                W3 = torch.zeros((no + 2 * mo), (ni + 2 * mi), *W1.shape[2:])
-
-                # 1 "merged to merged" block (i.e. the Git Re-Basin case)
-                W3[so12, si12] = (W1[bo1][:, bi1] + W2[bo2][:, bi2]) / 2
-
-                # 2 "seperate to seperate" blocks (run subsets of each network independently)
-                W3[so1, si1] = W1[bo1c][:, bi1c]
-                W3[so2, si2] = W2[bo2c][:, bi2c]
-
-                # 2 "merged to seperate" blocks (substitute missing inputs with merged version)
-                W3[so1, si12] = W1[bo1c][:, bi1]
-                W3[so2, si12] = W2[bo2c][:, bi2]
-
-                # 2 "seperate to merged" blocks (just merge the activations)
-                W3[so12, si1] = W1[bo1][:, bi1c] / 2
-                W3[so12, si2] = W2[bo2][:, bi2c] / 2
-
-        D3[tensor_name] = W3
-
-    model3 = deepcopy(model1).eval().cpu()
-    for axis, param in D3.items():
-        submodules = axis.split(".")
-        param = torch.nn.Parameter(param, requires_grad=False)
-        param.cpu()
-        set_attr(model3, submodules, param)
-
-    return model3
-
-def progressive_merge(spec: PermutationSpec, model1: Module, model2: Module, dataloader: DataLoader, num_batches: int, ratios: Ratios, return_all_costs: bool=False):
-    # In this function, we progressively merge the two models. We first merge the two models upto layer k
-    # then, we recompute the activations of the merged model upto layer k+1. We then merge the two models upto layer k+1
-    # and so on
-
-    # We first compute the matching costs between the two models
-    all_costs = []
-    perm, costs = activation_matching(
-        spec,
-        model1,
-        model2,
-        dataloader,
-        num_batches,
-        output_costs=True,
-    )
-    if return_all_costs:
-        all_costs.append((perm, costs))
-    layer_merging = 0
-    init_ratios = copy(ratios)
-    merged_layers = []
-    for idx, k in enumerate(init_ratios):
-        if idx > layer_merging:
-            init_ratios[k] = 1.0
-        else:
-            merged_layers.append(k)
-    merged_model = partial_merge(
-        spec, model1, model2, perm, costs, init_ratios)
-
-    merged_model.cuda()
-    merged_model.train()
-    # Reset batchnorm statistics
-    for (x, _), _ in zip(dataloader, range(num_batches)):
-        x = x.cuda()
-        merged_model(x)
-    merged_model.eval()
-    
-    # We want to do progressive merging for each block
-    # i.e. we first merge block 1, then block 2 and so on
-    # this is to handle residual connections
-    # I would want to change this to do this in a more fine-grained manner later
-    layer_groups = []
-    curr_group = []
-    curr_prefix = ""
-    for k, v in spec.items():
-        if len(curr_group) == 0:
-            curr_group.append(k.key.split(":")[0])
-            curr_prefix = k.key.split(".")[0]
-        else:
-            if k.key.split(".")[0] == curr_prefix:
-                curr_group.append(k.key.split(":")[0])
-            else:
-                layer_groups.append(curr_group)
-                curr_group = [k.key.split(":")[0]]
-                curr_prefix = k.key.split(".")[0]
-    layer_groups.append(curr_group)
-    print(layer_groups)
-    # We merge all layers in a layer group at once
-    # Then proceed to the next group
-     
-    merged_layers = ['conv1.weight']
-    for layer_merging in range(1, len(layer_groups)):
-        init_ratios = copy(ratios)
-
-        # for idx, k in enumerate(init_ratios):
-        #     if idx > layer_merging:
-        #         init_ratios[k] = 1.0
-        #     elif idx < layer_merging:
-        #         merged_layers.append(k) # .key.split(":")[0])
-        #         init_ratios[k] = 0.0  # Doing this will ensure that we go from merged to seperate while building the model
-        for idx, k in enumerate(init_ratios):
-            if k.key.split(":")[0] not in layer_groups[layer_merging]:
-                init_ratios[k] = 1.0 
-        # We now compute the matching costs between the merged model and the original model
-        gm_cross, merged_nodes = get_cross_module_progressive_merge(
-            merged_model, spec, merged_layers)
-        perm, costs = compute_progressive_matching_costs(
-            spec, gm_cross, dataloader, num_batches)
-        # print(init_ratios)
-        if return_all_costs:
-            all_costs.append((perm, costs))
-        blocks = get_blocks(spec, perm, costs, init_ratios)
-        model1.cpu()
-        model2.cpu()
-        merged_model.cpu()
-        for b in blocks:
-            blocks[b] = tuple(t.cpu() for t in blocks[b])
-        merged_model = build_progressive_merge_model(
-            spec, model1, model2, merged_model, blocks, merged_nodes)
-        merged_model.cuda()
-        merged_model.train()
-        model1.cuda()
-        model2.cuda()
-        
-        # for param in merged_model.named_parameters():
-        #     print(param[0], param[1].shape)
-        
-        # Reset batchnorm statistics
-        for m in merged_model.modules():
-            if isinstance(m, torch.nn.BatchNorm2d):
-                m.reset_running_stats()
-        for (x, _), _ in zip(dataloader, range(num_batches)):
-            x = x.cuda()
-            merged_model(x)
-        merged_model.eval()
-        merged_layers += layer_groups[layer_merging]
-
-    if return_all_costs:
-        return merged_model, all_costs
-    return merged_model
-
-
-
-
-
-
-
-
-
-import torch
-
-from collections import deque
-from collections.abc import Sequence
-from copy import copy, deepcopy
-from functools import wraps
-from typing import Union
-
-from utils import (
-    Permutation,
-    PermutationSpec,
-    StateDict,
-    apply_perm,
-    # apply_perm_with_padding,
-    lerp,
-    lslerp,
-    make_identity_perm,
-    # remove_zero_block,
-    slerp,
-    tree_mean,
-    
-)
-from compiler import PermutationProp
-from lsa_solvers import scipy_solve_lsa
-from activation_matching import cross_features_inner_product
-
-# def remove_zero_block(tensor, axis, block_size):
-#     # Find the indices where the sum along the specified axis is zero
-#     if len(tensor.shape) == 1:
-#         zero_indices = (tensor == 0).nonzero().squeeze()
-#     else:
-#         zero_indices = (torch.sum(tensor, dim=1-axis) == 0).nonzero().squeeze()
-
-#     # Find the start and end of the zero block
-#     if len(zero_indices) == 0:
-#         return tensor
-#     start_idx = zero_indices[0].item()
-#     end_idx = start_idx + block_size
-
-#     # Slice the tensor to exclude the block of zeros
-#     if axis == 0:
-#         return torch.cat((tensor[:start_idx], tensor[end_idx:]), axis=0)
-#     elif axis == 1:
-#         return torch.cat((tensor[:, :start_idx], tensor[:, end_idx:]), axis=1)
-
-
-
-# I think we can simplify this function, because zero blocks will always be at the beginning or in a specific position given the ratio
-# def remove_zero_block(tensor, axis, block_size):
-#     # Handling 1D tensors directly
-#     if tensor.dim() == 1:
-#         nonzero_indices = torch.nonzero(tensor, as_tuple=True)[0]
-#         return tensor[nonzero_indices]
-
-#     # Original shape of the tensor
-#     original_shape = tensor.shape
-    
-#     # Flatten the tensor around the specified axis
-#     flattened_tensor = tensor.flatten(0, axis - 1).flatten(1) if axis > 0 else tensor.flatten()
-
-#     # Find the indices where the sum along the axis is zero
-#     zero_indices = (torch.sum(flattened_tensor, dim=1) == 0).nonzero(as_tuple=True)[0]
-    
-#     # Handling the case where there are no zero blocks of the specified size
-#     if zero_indices.size(0) == 0 or zero_indices.size(0) < block_size:
-#         return tensor
-
-#     # Find the start index of the zero block
-#     start_idx = zero_indices[0].item()
-
-#     # Check for contiguous block of zeros of size 'block_size'
-#     if not torch.all(zero_indices[:block_size] == torch.arange(start_idx, start_idx + block_size)):
-#         return tensor
-
-#     # Remove the block of zeros and reshape back
-#     new_flattened_tensor = torch.cat((flattened_tensor[:start_idx], flattened_tensor[start_idx + block_size:]))
-#     new_shape = list(original_shape)
-#     new_shape[axis] -= block_size
-#     return new_flattened_tensor.view(new_shape)
 
 def remove_zero_block(tensor, axis, block_size, final_size, beginning=False):
     if tensor.shape[axis] < final_size:

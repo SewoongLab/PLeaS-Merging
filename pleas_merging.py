@@ -105,9 +105,6 @@ def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activati
         acts_ip_stacked = torch.cat([ip1, ip2], dim=0)
         acts_op_stacked = torch.cat([acts_op_model1, acts_op_model2], dim=0)
         
-        # acts_ip_stacked = torch.cat([torch.cat([i11, i1c, ip2[:,bi2c]], dim=1), torch.cat([i22, i1c, i2c], dim=1)] ,dim=0)
-        # acts_op_stacked = torch.cat([torch.cat([acts_op_model1[:,bo1], acts_op_model1[:,bo1c], acts_op_model2[:,bo2c]], dim=1), torch.cat([acts_op_model2[:,bo2], acts_op_model1[:,bo1c], acts_op_model2[:,bo2c]], dim=1)] ,dim=0)
-        # acts_op_stacked = torch.cat([acts_op_model1, acts_op_model2], dim=0)
         return acts_ip_stacked, acts_op_stacked
     
     elif 'perm_separatels' in merging:
@@ -140,11 +137,7 @@ def get_model_dict_and_params(model3):
         if isinstance(v, torch.nn.Conv2d) or isinstance(v, torch.nn.Linear):
             model3_dict[name] = deepcopy(v).float().cuda()
             model3_dict[name].requires_grad = True
-            # try:
-            #     if model3_dict[name].groups > 1:
-            #         model3_dict[name].groups = model3_dict[name].weight.shape[0]
-            # except AttributeError:
-            #     pass
+
             for p in model3_dict[name].parameters():
                 p.requires_grad = True
     m3_params = [x.parameters() for x in model3_dict.values()]
@@ -153,7 +146,6 @@ def get_model_dict_and_params(model3):
     return model3, model3_dict, m3_params
 
 def get_attr(obj, names):
-    # print(obj)
     if len(names) == 1:
         return getattr(obj, names[0])
     else:
@@ -223,8 +215,6 @@ def train(dataloader, model1, model2, model3, spec, perm, costs, budget_ratios, 
             perm_blocks[ax] = perm_blocks[axis]
 
     
-    # print(perm_blocks.keys())
-    # blocks contained for each layer, which
     axes_by_tensor = {}
     for pg in spec.values():
         for ax in pg.state:
@@ -267,7 +257,6 @@ def train(dataloader, model1, model2, model3, spec, perm, costs, budget_ratios, 
         v_sd = v.state_dict()
         for k2 in v_sd.keys():
             m3_sd[f"{k}.{k2}"] = v_sd[k2]
-            # print(f"Setting {k}.{k2} to {v_sd[k2].shape}")
     model3.load_state_dict(m3_sd)
     for hook in m1_hooks:
         hook.remove()
@@ -277,7 +266,6 @@ def train(dataloader, model1, model2, model3, spec, perm, costs, budget_ratios, 
 
 def get_fc_perm(perm, spec, costs, budget_ratios):
     perm_blocks = get_blocks(spec, perm, costs, budget_ratios, False)
-    # print(perm_blocks.keys())    
     for k,v in spec.items():
         if Axis('fc.weight', 1) in v.state:
             found = True
@@ -317,7 +305,6 @@ def eval_perm_model(model, fc, dataloader, num_classes, fc_perm, idx):
             feats = permute_final_features(model(x), fc_perm, idx)
             y_hat = fc(feats)
             acc(y_hat, y)
-    # print(acc.compute())
     return acc.compute()
     
     
