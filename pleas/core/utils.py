@@ -15,6 +15,13 @@ from torch.fx.passes.shape_prop import ShapeProp
 
 @dataclass(frozen=True)
 class Axis:
+    """
+    Represents a permutable axis in a tensor.
+    
+    Args:
+        key (str): Identifier for the tensor parameter
+        axis (int): Axis index within the tensor that can be permuted
+    """
     key: str
     axis: int
 
@@ -26,6 +33,14 @@ class Axis:
 
 @dataclass
 class PermutationGroup:
+    """
+    Group of axes that should be permuted together.
+    
+    Args:
+        size (int): Size of the permutation (number of units/neurons)
+        state (set[Axis]): Set of axes in the state dict
+        node (set[Axis]): Set of axes in the computation graph
+    """
     size: int
     state: set[Axis]
     node: set[Axis]
@@ -42,6 +57,15 @@ InputsOrShapes = Union[tuple[tuple, ...], tuple[torch.Tensor, ...]]
 
 
 def tree_normalize_path(path: PyTreePath):
+    """
+    Normalize a path to a nested attribute or element.
+    
+    Args:
+        path (PyTreePath): Path to normalize
+        
+    Returns:
+        list: Normalized path
+    """
     def process_atom(a):
         try:
             return int(a)
@@ -60,6 +84,16 @@ def tree_normalize_path(path: PyTreePath):
 
 
 def tree_index(tree, path: PyTreePath):
+    """
+    Access a nested element in a tree structure.
+    
+    Args:
+        tree: Tree structure to access
+        path (PyTreePath): Path to the element
+        
+    Returns:
+        The element at the specified path
+    """
     path = tree_normalize_path(path)
     subtree = tree
     for i, atom in enumerate(path):
@@ -72,6 +106,16 @@ def tree_index(tree, path: PyTreePath):
 
 
 def get_attr(obj, names):
+    """
+    Access a nested attribute in an object.
+    
+    Args:
+        obj: Object to access attribute from
+        names (list): List of attribute names to access in sequence
+        
+    Returns:
+        The requested attribute
+    """
     if len(names) == 1:
         return getattr(obj, names[0])
     else:
@@ -79,6 +123,17 @@ def get_attr(obj, names):
 
 
 def set_attr(obj, names, val):
+    """
+    Set a nested attribute in an object.
+    
+    Args:
+        obj: Object to set attribute in
+        names (list): List of attribute names to traverse
+        val: Value to set
+        
+    Returns:
+        The result of setting the attribute
+    """
     if len(names) == 1:
         return setattr(obj, names[0], val)
     else:
@@ -86,14 +141,41 @@ def set_attr(obj, names, val):
 
 
 def make_identity_perm(spec: PermutationSpec) -> Permutation:
+    """
+    Create an identity permutation for each axis in the specification.
+    
+    Args:
+        spec (PermutationSpec): Permutation specification
+        
+    Returns:
+        Permutation: Identity permutation mapping
+    """
     return {k: torch.arange(pg.size) for k, pg in spec.items()}
 
 
 def make_random_perm(spec: PermutationSpec) -> Permutation:
+    """
+    Create a random permutation for each axis in the specification.
+    
+    Args:
+        spec (PermutationSpec): Permutation specification
+        
+    Returns:
+        Permutation: Random permutation mapping
+    """
     return {k: torch.randperm(pg.size) for k, pg in spec.items()}
 
 
 def invert_perm(perm: Union[torch.tensor, Permutation]):
+    """
+    Invert a permutation or dictionary of permutations.
+    
+    Args:
+        perm (Union[torch.tensor, Permutation]): Permutation to invert
+        
+    Returns:
+        Union[torch.tensor, Permutation]: Inverted permutation
+    """
     if isinstance(perm, dict):
         return {k: invert_perm(p) for k, p in perm.items()}
 
@@ -103,6 +185,16 @@ def invert_perm(perm: Union[torch.tensor, Permutation]):
 
 
 def perm_eq(perm1: Permutation, perm2: Permutation) -> bool:
+    """
+    Check if two permutations are equal.
+    
+    Args:
+        perm1 (Permutation): First permutation
+        perm2 (Permutation): Second permutation
+        
+    Returns:
+        bool: True if permutations are equal, False otherwise
+    """
     return len(perm1) == len(perm2) and all(
         (perm2[k] == p).all() for (k, p) in perm1.items()
     )
@@ -115,6 +207,19 @@ def apply_perm(
     inplace=False,
     skip_missing=True,
 ):
+    """
+    Apply a permutation to a model or state dictionary.
+    
+    Args:
+        perm (Permutation): Permutation to apply
+        spec (PermutationSpec): Permutation specification
+        state (Union[nn.Module, StateDict]): Model or state dictionary to permute
+        inplace (bool, optional): Whether to modify state in place. Defaults to False.
+        skip_missing (bool, optional): Whether to skip missing keys. Defaults to True.
+        
+    Returns:
+        Union[nn.Module, StateDict]: Permuted model or state dictionary
+    """
     if isinstance(state, nn.Module):
         assert inplace == True
         state.load_state_dict(
@@ -140,6 +245,7 @@ def apply_perm(
 
     return state
 
+
 def apply_perm_with_padding(
     perm: Permutation,
     padding: Permutation,
@@ -150,7 +256,26 @@ def apply_perm_with_padding(
     inplace=False,
     skip_missing=True,
 ):
-    if isinstance(state, nn.Module):
+    """
+    Apply a permutation to a model or state dict with padding.
+    
+    This function applies a permutation to a model's weights and adds padding to
+    support partial merging operations.
+    
+    Args:
+        perm (Permutation): Permutation to apply
+        padding (Permutation): Indices to use for padding
+        size (int): Target size for the permuted dimension
+        pad_ahead (bool): Whether to add padding before the permuted weights
+        spec (PermutationSpec): Permutation specification
+        state (Union[torch.nn.Module, StateDict]): Model or state dict to permute
+        inplace (bool, optional): Whether to modify the state in place. Defaults to False.
+        skip_missing (bool, optional): Whether to skip missing keys. Defaults to True.
+        
+    Returns:
+        Union[torch.nn.Module, StateDict]: Permuted state
+    """
+    if isinstance(state, torch.nn.Module):
         assert inplace == True
         state.load_state_dict(
             apply_perm(perm, spec, state.state_dict(), inplace=inplace)
@@ -165,12 +290,13 @@ def apply_perm_with_padding(
             continue
 
         pg = spec[key]
-        assert P.shape == (pg.size,)
+        # assert P.shape == (pg.size,)
+        # print(f"Applying {key} with {P.shape} and {padding.shape} to {size}, {pg.size}")
         for ax in pg.state:
             if skip_missing and ax.key not in state:
                 continue
             
-            weight = state[ax.key]
+            weight = remove_zero_block(state[ax.key], ax.axis, len(padding), size, pad_ahead)
             if weight.shape[ax.axis] == size:
                 state[ax.key] = torch.index_select(weight, ax.axis, P.to(weight.device))
             
@@ -178,14 +304,22 @@ def apply_perm_with_padding(
             permuted_weights = torch.index_select(weight, ax.axis, P.to(weight.device))
             separate_weights = torch.index_select(weight, ax.axis, padding.to(weight.device))
             if ax.axis == 0:
-                padding_weights = torch.zeros((size - weight.shape[ax.axis], *weight.shape[1:]))
+                padding_weights = torch.zeros((len(padding), *weight.shape[1:])).to(weight.device)
             else:
-                padding_weights = torch.zeros((weight.shape[0], size - weight.shape[ax.axis], *weight.shape[2:]))
+                padding_weights = torch.zeros((weight.shape[0], len(padding), *weight.shape[2:])).to(weight.device)
                 
             if pad_ahead:
                 final_weights = torch.cat((padding_weights, separate_weights, permuted_weights), ax.axis)
             else:
                 final_weights = torch.cat((separate_weights, padding_weights, permuted_weights), ax.axis)
+            if not torch.abs(final_weights).sum() > 0.:
+                print(final_weights)
+                print(weight)
+                print(separate_weights, permuted_weights)
+                print(ax, P, padding)
+                print(weight.shape, final_weights.shape)
+                print(torch.abs(final_weights).sum())
+                raise ValueError("Zero norm")
             state[ax.key] = final_weights   
             
     return state
@@ -195,6 +329,11 @@ T = TypeVar("T")
 
 
 class UnionFind(Generic[T]):
+    """
+    Union-find data structure for grouping related elements.
+    
+    This is used to identify groups of axes that should be permuted together.
+    """
     def __init__(self, items: Sequence[T] = ()):
         self.parent_node = {}
         self.rank = {}
@@ -242,12 +381,28 @@ class UnionFind(Generic[T]):
 
 
 def reset_running_stats(net):
+    """
+    Reset running statistics for BatchNorm layers in a network.
+    
+    Args:
+        net (torch.nn.Module): Network to reset statistics for
+    """
     for m in net.modules():
         if isinstance(m, nn.BatchNorm2d):
             m.reset_running_stats()
 
 
 def tree_multimap(f, *trees):
+    """
+    Apply a function to corresponding elements in multiple trees.
+    
+    Args:
+        f: Function to apply
+        *trees: Trees to map over
+        
+    Returns:
+        Result tree after applying the function
+    """
     flats, specs = zip(*(pytree.tree_flatten(tree) for tree in trees))
 
     def eq_checker(a, b):
@@ -261,11 +416,30 @@ def tree_multimap(f, *trees):
 
 
 def tree_reduce(f, tree):
+    """
+    Reduce a tree to a single value using a binary function.
+    
+    Args:
+        f: Binary function to apply
+        tree: Tree to reduce
+        
+    Returns:
+        Reduced value
+    """
     flat, _ = pytree.tree_flatten(tree)
     return reduce(f, flat)
 
 
 def tree_linear(*terms):
+    """
+    Compute a linear combination of trees.
+    
+    Args:
+        *terms: Pairs of (coefficient, tree)
+        
+    Returns:
+        Result tree
+    """
     assert len(terms) > 0
 
     def inner(*tensors):
@@ -275,10 +449,29 @@ def tree_linear(*terms):
 
 
 def tree_mean(*sds):
+    """
+    Compute the mean of multiple trees.
+    
+    Args:
+        *sds: Trees to average
+        
+    Returns:
+        Mean tree
+    """
     return tree_linear(*((1 / len(sds), sd) for sd in sds))
 
 
 def tree_vdot(tree1, tree2):
+    """
+    Compute the dot product of two trees.
+    
+    Args:
+        tree1: First tree
+        tree2: Second tree
+        
+    Returns:
+        Scalar dot product
+    """
     def vdot(a, b):
         return torch.sum(a * b)
         # return torch.vdot(a.ravel(), b.ravel())
@@ -287,19 +480,60 @@ def tree_vdot(tree1, tree2):
 
 
 def tree_norm(tree):
+    """
+    Compute the Euclidean norm of a tree.
+    
+    Args:
+        tree: Tree to compute norm for
+        
+    Returns:
+        Scalar norm
+    """
     return torch.sqrt(tree_vdot(tree, tree))
 
 
 def tree_cosine_sim(tree1, tree2):
+    """
+    Compute the cosine similarity between two trees.
+    
+    Args:
+        tree1: First tree
+        tree2: Second tree
+        
+    Returns:
+        Cosine similarity
+    """
     return tree_vdot(tree1, tree2) / tree_norm(tree1) / tree_norm(tree2)
 
 
 def lerp(lam, tree1, tree2):
+    """
+    Linear interpolation between two trees.
+    
+    Args:
+        lam (float): Interpolation parameter (0: tree1, 1: tree2)
+        tree1: First tree
+        tree2: Second tree
+        
+    Returns:
+        Interpolated tree
+    """
     # return {k: (1 - lam) * a + lam * state_b[k] for k, a in state_a.items()}
     return tree_linear(((1 - lam), tree1), (lam, tree2))
 
 
 def slerp(lam, tree1, tree2):
+    """
+    Spherical linear interpolation between two trees.
+    
+    Args:
+        lam (float): Interpolation parameter (0: tree1, 1: tree2)
+        tree1: First tree
+        tree2: Second tree
+        
+    Returns:
+        Interpolated tree
+    """
     omega = torch.acos(tree_cosine_sim(tree1, tree2))
     a, b = torch.sin((1 - lam) * omega), torch.sin(lam * omega)
     denom = torch.sin(omega)
@@ -307,12 +541,34 @@ def slerp(lam, tree1, tree2):
 
 
 def lslerp(lam, tree1, tree2):
+    """
+    Local spherical linear interpolation between two trees.
+    
+    Args:
+        lam (float): Interpolation parameter (0: tree1, 1: tree2)
+        tree1: First tree
+        tree2: Second tree
+        
+    Returns:
+        Interpolated tree
+    """
     return tree_multimap(partial(slerp, lam), tree1, tree2)
 
 
 def count_linear_flops(
     spec: PermutationSpec, model: torch.nn.Module, inputs_or_shapes: InputsOrShapes
 ) -> tuple[int, list[tuple[int, Axis, ...]]]:
+    """
+    Count the FLOPs for linear and convolutional operations in a model.
+    
+    Args:
+        spec (PermutationSpec): Permutation specification
+        model (torch.nn.Module): Model to analyze
+        inputs_or_shapes (InputsOrShapes): Input shapes or tensors
+        
+    Returns:
+        tuple: (flops, terms) where terms represents the operations
+    """
     # TODO: Only works for nn.Conv2d and nn.Linear ATM
 
     # Prepare the inputs and perform the shape propagation
@@ -360,115 +616,32 @@ def count_linear_flops(
 
     return flops, new_terms
 
-import math
-import random
-from torch.utils.data import DataLoader
-class FractionalDataloader:
-    def __init__(self, dataloader, fraction, seed=None):
-        self.dataloader_numel = len(dataloader.dataset)
-        self.numel = int(fraction * self.dataloader_numel)
 
-        self.batch_size = self.dataloader_numel / len(dataloader)
-        self.num_batches = int(math.ceil(self.numel / self.batch_size))
-        self.dataloader = dataloader
-        self.dataset = self.dataloader.dataset
-        self.seed = seed
+def remove_zero_block(tensor, axis, block_size, final_size, beginning=False):
+    """
+    Remove a block of zeros from a tensor along a specified axis.
     
-    def __iter__(self):
-        cur_elems = 0
-        if self.seed is not None:
-            self.dataloader.dataset.set_seed(self.seed)
-            torch.manual_seed(self.seed)
-            random.seed(self.seed)
-            np.random.seed(self.seed)
-        it = iter(self.dataloader)
-        while cur_elems < self.numel:
-            try:
-                x, y = next(it)
-                cur_elems += x.shape[0]
-                yield x, y
-            except StopIteration:
-                it = iter(self.dataloader)
-                
+    Args:
+        tensor (torch.Tensor): Input tensor
+        axis (int): Axis along which to remove zeros
+        block_size (int): Size of the zero block to remove
+        final_size (int): Final size of the tensor along the axis
+        beginning (bool, optional): Whether the zero block is at the beginning. Defaults to False.
         
-    def __len__(self):
-        return self.num_batches
-def create_heldout_split(dataset, fraction):
-    root = dataset.root_og
-    val_set, test_set = train_test_split(dataset.dataset, test_size=fraction)
-    val_set = dataset.__class__(root, train=dataset.train, transform=dataset.transform, base_set=val_set)
-    test_set = dataset.__class__(root, train=dataset.train, transform=dataset.transform, base_set=test_set)
-    return val_set, test_set
-
-def prepare_data(config, device='cuda'):
-    """ Load all dataloaders required for experiment. """
-    if isinstance(config, list):
-        return [prepare_data(c, device) for c in config]
-    
-    dataset_name = config['name']
-    
-    from datasets_module import configs as config_module
-    data_config = deepcopy(getattr(config_module, dataset_name))
-    data_config.update(config)
-    data_config['device'] = device
-
-    if data_config['type'] == 'cifar':
-        from datasets_module.cifar import prepare_train_loaders, prepare_test_loaders
-        train_loaders = prepare_train_loaders(data_config)
-        test_loaders = prepare_test_loaders(data_config)
-    elif data_config['type'] == 'imagenet':
-        # train_loaders, test_loaders = None,  None
-        from datasets_module.imagenet import prepare_loaders, ImageNet
-        # train_loaders, test_loaders = prepare_loaders(data_config)
-        im = ImageNet()
-        train_loaders = {"full": im.train_loader}
-        test_loaders = {"full": im.val_loader}
-    elif data_config['type'] == 'nabird':
-        from datasets_module.nabird import prepare_train_loaders, prepare_test_loaders
-        train_loaders = prepare_train_loaders(data_config)
-        test_loaders = prepare_test_loaders(data_config)
-    elif data_config['type'] == 'cub':
-        from datasets_module.cub import prepare_train_loaders, prepare_test_loaders
-        train_loaders = prepare_train_loaders(data_config)
-        test_loaders = prepare_test_loaders(data_config)
-    elif data_config['type'] == 'oxford_pets':
-        from datasets_module.oxford_pets import prepare_train_loaders, prepare_test_loaders
-        train_loaders = prepare_train_loaders(data_config)
-        test_loaders = prepare_test_loaders(data_config)
-    elif data_config['type'] == 'stanford_dogs':
-        from datasets_module.stanford_dogs import prepare_train_loaders, prepare_test_loaders
-        train_loaders = prepare_train_loaders(data_config)
-        test_loaders = prepare_test_loaders(data_config)
-    elif 'domainnet' in data_config['type']:
-        from datasets_module.domainnet import prepare_test_loaders, prepare_train_loaders
-        train_loaders = prepare_train_loaders(data_config, data_config['type'].split('_')[-1])
-        test_loaders = prepare_test_loaders(data_config, data_config['type'].split('_')[-1])
-    else:
-        raise NotImplementedError(config['type'])
-    
-    if 'train_fraction' in data_config:
-        for k, v in dict(train_loaders.items()).items():
-            if k == 'splits':
-                train_loaders[k] = [FractionalDataloader(x, data_config['train_fraction']) for x in v]
-            elif not isinstance(v, list) and not isinstance(v, torch.Tensor):
-                train_loaders[k] = FractionalDataloader(v, data_config['train_fraction'])
-
-    return {
-        'train': train_loaders,
-        'test': test_loaders
-    }
-
-
-def remove_zero_block(tensor, axis, block_size):
-    # Find the indices where the sum along the specified axis is zero
-    zero_indices = (torch.sum(tensor, dim=1-axis) == 0).nonzero().squeeze()
-
-    # Find the start and end of the zero block
-    start_idx = zero_indices[0].item()
-    end_idx = start_idx + block_size
-
-    # Slice the tensor to exclude the block of zeros
+    Returns:
+        torch.Tensor: Tensor with zero block removed
+    """
+    if tensor.shape[axis] < final_size:
+        return tensor
     if axis == 0:
-        return torch.cat((tensor[:start_idx], tensor[end_idx:]), axis=0)
+        if beginning:
+            assert tensor[:block_size].sum() == 0., print(final_size, beginning, block_size)
+            return tensor[block_size:]
+        else:
+            return torch.cat([tensor[:block_size], tensor[block_size*2:]], dim=0)
     elif axis == 1:
-        return torch.cat((tensor[:, :start_idx], tensor[:, end_idx:]), axis=1)
+        if beginning:
+            assert tensor[:, :block_size].sum() == 0.
+            return tensor[:, block_size:]
+        else:
+            return torch.cat([tensor[:, :block_size], tensor[:, block_size*2:]], dim=1)
