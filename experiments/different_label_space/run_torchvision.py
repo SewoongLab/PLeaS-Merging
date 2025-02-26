@@ -65,7 +65,7 @@ def parse_args():
                         choices=["cub", "nabird", "oxford_pets", "stanford_dogs"],
                         help="Second dataset")
     parser.add_argument("--model_type", type=str, default="rn18",
-                        choices=["rn18", "rn50"],
+                        choices=["rn18", "rn50", "rn101"],
                         help="Model architecture")
     parser.add_argument("--variant1", type=str, default="v1a",
                         help="Variant of first model")
@@ -76,8 +76,7 @@ def parse_args():
                         choices=["pleas", "weight_matching", "perm_gradmask", 
                                 "mean", "mean_eval_only", "perm_eval_only"],
                         help="Merging strategy")
-    parser.add_argument("--budget_ratio", type=float, default=1.46,
-                        choices=[1.0, 1.24, 1.46, 1.71, 2.0],
+    parser.add_argument("--budget_ratio", type=float, default=1.0,
                         help="Budget ratio for partial merging")
     
     parser.add_argument("--wandb", action="store_true",
@@ -101,8 +100,9 @@ def main():
     # Set up logging
     if args.wandb:
         wandb_run = wandb.init(
-            project=f"perm_gd_tv_rn_18_zipsched_seed_{args.seed}", 
+            project=f"pleas_diff_label_space", 
             config={
+                "model": args.model_type,
                 "budget_ratio": args.budget_ratio, 
                 'merge type': f"{args.merging}",
                 'd1': args.dataset1, 
@@ -145,11 +145,25 @@ def main():
     
     # Load models
     print("Loading models...")
-    model1 = torchvision.models.resnet18().cuda()
-    model2 = torchvision.models.resnet18().cuda()
+    if args.model_type == 'rn18':
+        model1 = torchvision.models.resnet18().cuda()
+        model2 = torchvision.models.resnet18().cuda()
+        model1.fc = torch.nn.Linear(512, num_classes_1).cuda()
+        model2.fc = torch.nn.Linear(512, num_classes_2).cuda()
+    else:
+        if args.model_type == 'rn50':
+            model1 = torchvision.models.resnet50().cuda()
+            model2 = torchvision.models.resnet50().cuda()
+        elif args.model_type == 'rn101':
+            model1 = torchvision.models.resnet101().cuda()
+            model2 = torchvision.models.resnet101().cuda()
+        else:
+            raise ValueError("Invalid model type")
+
+        model1.fc = torch.nn.Linear(2048, num_classes_1).cuda()
+        model2.fc = torch.nn.Linear(2048, num_classes_2).cuda()
+
     
-    model1.fc = torch.nn.Linear(512, num_classes_1).cuda()
-    model2.fc = torch.nn.Linear(512, num_classes_2).cuda()
     
     # Determine the variant to use for the second model (opposite of first)
     non_pt = 'v1b' if args.variant1 == 'v1a' else 'v1a'
@@ -194,7 +208,7 @@ def main():
             model1,
             model2,
             train_loader,
-            30,  # Use a smaller number for testing, increase for real experiments
+            100,  
             output_costs=True,
         )
     
@@ -234,7 +248,7 @@ def main():
             args.max_steps, 
             wandb_run, 
             merging=args.merging if 'perm' in args.merging else 'perm_gradmask',
-            rn_18=True
+            rn_18=args.model_type == 'rn18',
         )
     
     # Reset batch norm statistics

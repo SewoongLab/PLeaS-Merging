@@ -13,17 +13,16 @@ import torchvision
 import torchmetrics
 import wandb
 import gc
+
 from copy import deepcopy, copy
+from torchvision import transforms
 
 from pleas.core.utils import Axis, count_linear_flops
 from pleas.core.compiler import get_permutation_spec
 from pleas.methods.activation_matching import activation_matching
 from pleas.methods.weight_matching import weight_matching
-from pleas.methods.partial_matching import partial_merge, qp_ratios, get_blocks
-from pleas.methods.pleas_merging import train, train_eval_linear_probe
-from experiments.configs.dataset_configs import DATASETS
-from experiments.configs.model_configs import MODELS
-from experiments.utils.data_utils import get_train_test_loaders
+from pleas.methods.partial_matching import partial_merge
+from pleas.methods.pleas_merging import train
 
 # Configuration for experiments
 MODEL_PATH = os.environ.get('MODEL_PATH', '/path/to/models')
@@ -112,8 +111,8 @@ def parse_args():
     parser.add_argument("--domain2", type=str, required=True, 
                         choices=["clipart", "painting", "infograph", "real"],
                         help="Second domain")
-    parser.add_argument("--model_type", type=str, default="rn101",
-                        choices=["rn50", "rn101"],
+    parser.add_argument("--model_type", type=str, default="rn50",
+                        choices=["rn18", "rn50", "rn101"],
                         help="Model architecture")
     parser.add_argument("--variant1", type=str, default="v2a",
                         help="Variant of first model")
@@ -121,10 +120,9 @@ def parse_args():
                         help="Variant of second model")
     
     parser.add_argument("--merging", type=str, default="pleas",
-                        choices=["pleas", "weight_matching", "mean", "mean_eval_only", "perm_eval_only"],
+                        choices=["pleas", "weight_matching", "mean", "mean_eval_only", "perm_eval_only", "weight_matching_eval_only"],
                         help="Merging strategy")
-    parser.add_argument("--budget_ratio", type=float, default=1.5,
-                        choices=[1.0, 1.1, 1.76, 1.9, 2.0],
+    parser.add_argument("--budget_ratio", type=float, default=1.0,
                         help="Budget ratio for partial merging")
     
     parser.add_argument("--wandb", action="store_true",
@@ -148,7 +146,7 @@ def main():
     # Set up logging
     if args.wandb:
         wandb_run = wandb.init(
-            project=f"perm_gd_domainnet_rn101", 
+            project=f"pleas_same_label_space", 
             config={
                 "budget_ratio": args.budget_ratio,
                 "m1": args.variant1,
@@ -156,7 +154,7 @@ def main():
                 "d1": args.domain1,
                 "d2": args.domain2,
                 "merging": args.merging,
-                'grb_data': 'orig'
+                'model': args.model_type,
             }
         )
     else:
@@ -164,24 +162,35 @@ def main():
     
     # Load models
     print("Loading models...")
-    model1 = torchvision.models.resnet101(pretrained=False).cuda()
-    model1.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
-    model2 = torchvision.models.resnet101(pretrained=False).cuda()
-    model2.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
+    if args.model_type == "rn18":
+        model1 = torchvision.models.resnet18(pretrained=False).cuda()
+        model1.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
+        model2 = torchvision.models.resnet18(pretrained=False).cuda()
+        model2.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
+    elif args.model_type == "rn50":
+        model1 = torchvision.models.resnet50(pretrained=False).cuda()
+        model1.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
+        model2 = torchvision.models.resnet50(pretrained=False).cuda()
+        model2.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
+    elif args.model_type == "rn101":  
+        model1 = torchvision.models.resnet101(pretrained=False).cuda()
+        model1.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
+        model2 = torchvision.models.resnet101(pretrained=False).cuda()
+        model2.fc = torch.nn.Linear(model1.fc.in_features, 345).cuda()
     
     # Load model weights
     try:
         model1.load_state_dict(torch.load(
-            f'{MODEL_PATH}/domainnet/scr/{args.domain1}/{args.variant1}/model_epoch_30.pth'))
+            f'{MODEL_PATH}/domainnet/scr/{args.domain1}/{args.variant1}/model.pth'))
         model2.load_state_dict(torch.load(
-            f'{MODEL_PATH}/domainnet/scr/{args.domain2}/{args.variant2}/model_epoch_30.pth'))
+            f'{MODEL_PATH}/domainnet/scr/{args.domain2}/{args.variant2}/model.pth'))
     except:
         print("Error loading model weights. Please check paths.")
         return
     
     # Load datasets
     print("Loading datasets...")
-    from torchvision import transforms
+
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                     std=[0.229, 0.224, 0.225])
     
