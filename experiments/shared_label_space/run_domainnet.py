@@ -21,9 +21,10 @@ from pleas.core.utils import Axis, count_linear_flops
 from pleas.core.compiler import get_permutation_spec
 from pleas.methods.activation_matching import activation_matching
 from pleas.methods.weight_matching import weight_matching
-from pleas.methods.partial_matching import partial_merge
+from pleas.methods.partial_matching import partial_merge, qp_ratios
 from pleas.methods.pleas_merging import train
 
+from experiments.datasets.domainnet import CustomImageFolder
 # Configuration for experiments
 MODEL_PATH = os.environ.get('MODEL_PATH', '/path/to/models')
 
@@ -124,6 +125,8 @@ def parse_args():
                         help="Merging strategy")
     parser.add_argument("--budget_ratio", type=float, default=1.0,
                         help="Budget ratio for partial merging")
+    parser.add_argument("--use_zip_ratios", action="store_true",
+                        help="Use zipping strategy for ratios")
     
     parser.add_argument("--wandb", action="store_true",
                         help="Enable Weights & Biases logging")
@@ -208,7 +211,6 @@ def main():
     ])
     
     # Create train and test loaders
-    from experiments.utils.data_utils import CustomImageFolder
     train_loader1 = CustomImageFolder(
         f"/path/to/{args.domain1}/", 
         f"/path/to/{args.domain1}/train_images.txt", 
@@ -258,12 +260,22 @@ def main():
         )
     
     # Count FLOPs and get terms
-    _, terms = count_linear_flops(spec, model1, ((1, 3, 224, 224),))
-    
-    # Get budget ratios
-    orig_ratios = {k: 0.0 for k in spec.keys() if isinstance(k.key, str)}
-    budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio)
-    budget_ratios = {Axis(k, 0): v for k, v in budget_ratios.items()}
+    if not args.use_zip_ratios:
+        R0 = np.load(
+            "/gscratch/sewoong/jhayase/oh/git-re-basin/git-re-basin-fx/archive/rn50-layerwise-0.npy")
+        R1 = np.load(
+            "/gscratch/sewoong/jhayase/oh/git-re-basin/git-re-basin-fx/archive/rn50-layerwise-1.npy")
+
+        _, terms = count_linear_flops(spec, model1, ((1, 3, 224, 224),))
+
+        
+        obj_weights = dict(
+            zip(spec, (R1 - 0.4684)*(2 - args.budget_ratio) - (R0 - 0.7743)*(args.budget_ratio - 1)))
+        budget_ratios = qp_ratios(spec, terms, args.budget_ratio, obj_weights)
+    else:
+        orig_ratios = {k: 0.0 for k in spec.keys()}
+
+        budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio)
     
     # Process permutations based on merging strategy
     new_perm, new_costs = {}, {}

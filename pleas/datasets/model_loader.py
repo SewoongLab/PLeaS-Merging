@@ -1,7 +1,6 @@
 import torch
 from torchvision import models
-# ConvNeXt models currently broken
-import ConvNeXt.models.convnext as convnext
+
 
 
 def load_model(name, variant=None):

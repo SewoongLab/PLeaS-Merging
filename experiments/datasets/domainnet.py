@@ -1,15 +1,9 @@
 import os
 import random
 from torchvision.datasets import ImageFolder
-# from torch.utils.data import DataLoader
-# import torchvision.models as models
 
 import torch
-# import torch.nn as nn
-# import torch.optim as optim
-# from torch.utils.data import DataLoader
-# import wandb
-# import argparse
+
 from tqdm import tqdm
 from torchvision import transforms
 
