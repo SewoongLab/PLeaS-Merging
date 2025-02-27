@@ -26,7 +26,7 @@ from pleas.methods.pleas_merging import train
 
 from experiments.datasets.domainnet import CustomImageFolder
 # Configuration for experiments
-MODEL_PATH = os.environ.get('MODEL_PATH', '/path/to/models')
+MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts')
 
 
 def get_zip_ratios(initial_ratios, budget_ratio):
@@ -184,9 +184,9 @@ def main():
     # Load model weights
     try:
         model1.load_state_dict(torch.load(
-            f'{MODEL_PATH}/domainnet/scr/{args.domain1}/{args.variant1}/model.pth'))
+            f'{MODEL_PATH}/{args.model_type}/domainnet/{args.domain1}/{args.variant1}/model.pth'))
         model2.load_state_dict(torch.load(
-            f'{MODEL_PATH}/domainnet/scr/{args.domain2}/{args.variant2}/model.pth'))
+            f'{MODEL_PATH}/{args.model_type}/domainnet/{args.domain2}/{args.variant2}/model.pth'))
     except:
         print("Error loading model weights. Please check paths.")
         return

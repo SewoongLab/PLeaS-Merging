@@ -9,7 +9,7 @@ Neural networks are not uniquely identified due to weight-space symmetries. Two 
 1. **A modular implementation of Git Re-Basin** for finding permutations between neural networks using activation or weight matching
 2. **An extension to partial model merging** using permutation matching and budget constraints
 3. **Our novel PLeaS algorithm**, which optimizes merged models through least-squares training while respecting permutation structure
-4. **Scripts to reproduce our experiments** on various datasets including DomainNet and TorchVision datasets
+4. **Scripts to reproduce our experiments** on various datasets for ResNet models.
 
 ## Installation
 
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 # Install the package in development mode
 pip install -e .
 ```
-
+Data is at - `s3://pleas-merging-artiacts-sewoonglab`
 ## Key Components
 
 ### 1. Git Re-Basin Implementation
