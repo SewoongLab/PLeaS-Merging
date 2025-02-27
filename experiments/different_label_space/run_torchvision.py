@@ -23,12 +23,13 @@ from pleas.methods.weight_matching import weight_matching
 from pleas.methods.partial_matching import partial_merge, qp_ratios, get_blocks
 from pleas.methods.pleas_merging import train, train_eval_linear_probe
 from experiments.datasets.interface import get_train_test_loaders
+from experiments.configs.merge_configs import BUDGET_RATIOS
 
 # Configuration for experiments
 MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts')
 
 
-def get_zip_ratios(initial_ratios, budget_ratio):
+def get_zip_ratios(initial_ratios, budget_ratio, base_budget_ratios):
     """
     Create layer-wise ratios based on the budget ratio using a zipping strategy.
     
@@ -39,12 +40,11 @@ def get_zip_ratios(initial_ratios, budget_ratio):
     Returns:
         dict: Updated ratios dictionary
     """
-    layer_dict = {1.0: 4, 1.24: 3, 1.46: 2, 1.71: 1, 2.0: 0}
+    layer_dict = {base_budget_ratios[0]: 4, base_budget_ratios[1]: 3, base_budget_ratios[2]: 2, base_budget_ratios[3]: 1, base_budget_ratios[4]: 0}
     new_ratios = {}
     for k, v in initial_ratios.items():
         if k.startswith('layer'):
             layernum = int(k.split('.')[0].split('layer')[1])
-            print(k, layernum)
             if layernum <= layer_dict[budget_ratio]:
                 new_ratios[k] = 0.
             else:
@@ -64,6 +64,7 @@ def parse_args():
     parser.add_argument("--dataset2", type=str, required=True, 
                         choices=["cub", "nabird", "oxford_pets", "stanford_dogs"],
                         help="Second dataset")
+    parser.add_argument("--data_dir", type=str, default="/scr/",)
     parser.add_argument("--model_type", type=str, default="rn18",
                         choices=["rn18", "rn50", "rn101"],
                         help="Model architecture")
@@ -110,7 +111,6 @@ def main():
                 'd1': args.dataset1, 
                 'd2': args.dataset2, 
                 'pretrained': args.variant1, 
-                'grb_data': "orig-bn-orig-linearprobe"
             }
         )
     else:
@@ -119,10 +119,10 @@ def main():
     # Load datasets
     print(f"Loading datasets: {args.dataset1} and {args.dataset2}...")
     dataset_1_train, dataset_1_test = get_train_test_loaders(
-        args.dataset1, 16, True, directory_suffix=str(args.seed))
+        args.dataset1, 16, True, dir=args.data_dir)
 
     dataset_2_train, dataset_2_test = get_train_test_loaders(
-        args.dataset2, 16, True, directory_suffix=str(args.seed))
+        args.dataset2, 16, True, dir=args.data_dir)
     
     # Get number of classes for each dataset
     try:
@@ -230,7 +230,8 @@ def main():
     else:
         orig_ratios = {k: 0.0 for k in spec.keys()}
 
-        budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio)
+        budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio, base_budget_ratios=BUDGET_RATIOS[args.model_type])
+
         
     budget_ratios = {Axis(k, 0): v for k, v in budget_ratios.items()}
     

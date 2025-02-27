@@ -22,22 +22,7 @@ MERGE_STRATEGIES = {
 }
 
 # Budget ratios to experiment with
-BUDGET_RATIOS = [1.0, 1.24, 1.46, 1.71, 2.0]
+BUDGET_RATIOS = {'rn18': [1.0, 1.24, 1.46, 1.71, 2.0],
+                 'rn50': [1.0, 1.2, 1.55, 1.8, 2.0],
+                 'rn101': [1.0, 1.2, 1.55, 1.8, 2.0],}
 
-# Zipping strategy for progressive merging
-def get_zip_ratios(initial_ratios, budget_ratio):
-    """
-    Create layer-wise ratios based on the budget ratio using a zipping strategy.
-    """
-    layer_dict = {1.0: 4, 1.24: 3, 1.46: 2, 1.71: 1, 2.0: 0}
-    new_ratios = {}
-    for k, v in initial_ratios.items():
-        if k.startswith('layer'):
-            layernum = int(k.split('.')[0].split('layer')[1])
-            if layernum <= layer_dict[budget_ratio]:
-                new_ratios[k] = 0.
-            else:
-                new_ratios[k] = 1.
-        else:
-            new_ratios[k] = 0.
-    return new_ratios

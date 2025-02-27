@@ -12,7 +12,7 @@ import torch
 import torchvision
 import torchmetrics
 import wandb
-import gc
+import numpy as np
 
 from copy import deepcopy, copy
 from torchvision import transforms
@@ -25,11 +25,13 @@ from pleas.methods.partial_matching import partial_merge, qp_ratios
 from pleas.methods.pleas_merging import train
 
 from experiments.datasets.domainnet import CustomImageFolder
+from experiments.configs.merge_configs import BUDGET_RATIOS
+
 # Configuration for experiments
 MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts')
+DOMAINNET_PATH = os.environ.get('DOMAINNET_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts/domainnet')
 
-
-def get_zip_ratios(initial_ratios, budget_ratio):
+def get_zip_ratios(initial_ratios, budget_ratio, base_budget_ratios):
     """
     Create layer-wise ratios based on the budget ratio using a zipping strategy.
     
@@ -40,7 +42,7 @@ def get_zip_ratios(initial_ratios, budget_ratio):
     Returns:
         dict: Updated ratios dictionary
     """
-    layer_dict = {1.0: 4, 1.1: 3, 1.76: 2, 1.89: 1, 2.0: 0}
+    layer_dict = {base_budget_ratios[0]: 4, base_budget_ratios[1]: 3, base_budget_ratios[2]: 2, base_budget_ratios[3]: 1, base_budget_ratios[4]: 0}
     new_ratios = {}
     for k, v in initial_ratios.items():
         if k.startswith('layer'):
@@ -119,6 +121,8 @@ def parse_args():
                         help="Variant of first model")
     parser.add_argument("--variant2", type=str, default="v2b",
                         help="Variant of second model")
+    parser.add_argument("--data_dir", type=str, default="/scr/",)
+    
     
     parser.add_argument("--merging", type=str, default="pleas",
                         choices=["pleas", "weight_matching", "mean", "mean_eval_only", "perm_eval_only", "weight_matching_eval_only"],
@@ -212,12 +216,12 @@ def main():
     
     # Create train and test loaders
     train_loader1 = CustomImageFolder(
-        f"/path/to/{args.domain1}/", 
-        f"/path/to/{args.domain1}/train_images.txt", 
+        f"{args.data_dir}/domainnet/{args.domain1}/", 
+        f"{args.data_dir}/domainnet/train_images.txt", 
         inmemory=False, transform=train_transforms)
     train_loader2 = CustomImageFolder(
-        f"/path/to/{args.domain2}/", 
-        f"/path/to/{args.domain2}/train_images.txt", 
+        f"{args.data_dir}/domainnet/{args.domain2}/", 
+        f"{args.data_dir}/domainnet/{args.domain2}/train_images.txt", 
         inmemory=False, transform=train_transforms)
     
     train_loader = torch.utils.data.DataLoader(
@@ -227,8 +231,8 @@ def main():
     test_loaders = dict([
         (x, torch.utils.data.DataLoader(
             CustomImageFolder(
-                f"/path/to/{x}/", 
-                f"/path/to/{x}/test_images.txt", 
+                f"{args.data_dir}/domainnet/{x}/", 
+                f"{args.data_dir}/domainnet/{x}/test_images.txt", 
                 split_ratio=1.0, inmemory=False, transform=val_transforms), 
             batch_size=256)) 
         for x in ["clipart", "painting", "infograph", "real"]
@@ -275,7 +279,7 @@ def main():
     else:
         orig_ratios = {k: 0.0 for k in spec.keys()}
 
-        budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio)
+        budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio, base_budget_ratios=BUDGET_RATIOS[args.model_type])
     
     # Process permutations based on merging strategy
     new_perm, new_costs = {}, {}

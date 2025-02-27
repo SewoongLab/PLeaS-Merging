@@ -8,11 +8,8 @@ from torchvision import datasets as tv_datasets
 import torch
 
 
-def get_train_test_loaders(dataset_name, batch_size, use_augmentations=False, directory_suffix=None):
-    if directory_suffix is None:
-        dir = '/scr/'
-    else:
-        dir = f'/scr/{directory_suffix}/'
+def get_train_test_loaders(dataset_name, batch_size, use_augmentations=False, dir='/scr/'):
+
     if use_augmentations:
         train_transforms = transforms.Compose([
         transforms.RandomResizedCrop(224),
