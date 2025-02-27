@@ -28,8 +28,8 @@ from experiments.datasets.domainnet import CustomImageFolder
 from experiments.configs.merge_configs import BUDGET_RATIOS
 
 # Configuration for experiments
-MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts')
-DOMAINNET_PATH = os.environ.get('DOMAINNET_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts/domainnet')
+MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts/models')
+DOMAINNET_PATH = os.environ.get('DOMAINNET_PATH', '/scr/domainnet')
 
 def get_zip_ratios(initial_ratios, budget_ratio, base_budget_ratios):
     """
@@ -124,9 +124,9 @@ def parse_args():
     parser.add_argument("--data_dir", type=str, default="/scr/",)
     
     
-    parser.add_argument("--merging", type=str, default="pleas",
-                        choices=["pleas", "weight_matching", "mean", "mean_eval_only", "perm_eval_only", "weight_matching_eval_only"],
-                        help="Merging strategy")
+    parser.add_argument("--merging", type=str, default="pleas_weight",
+                        choices=["pleas_weight", "pleas_activation", "weight_matching", 
+                                 "perm_activation"],)
     parser.add_argument("--budget_ratio", type=float, default=1.0,
                         help="Budget ratio for partial merging")
     parser.add_argument("--use_zip_ratios", action="store_true",
@@ -243,7 +243,7 @@ def main():
     
     # Perform permutation matching
     print("Performing permutation matching...")
-    if 'weight_match' in args.merging:
+    if 'weight' in args.merging:
         perm_imnet, costs_imnet = weight_matching(
             spec=spec, 
             state_as=model1.state_dict(), 
@@ -301,7 +301,9 @@ def main():
         model3 = partial_merge(spec, model1, model2, new_perm, new_costs, budget_ratios)
     model3.cuda()
     
-    if 'eval_only' not in args.merging:
+    
+    
+    if 'pleas' in args.merging:
         # Train with PLeaS
         print("Training with PLeaS...")
         model3 = train(
@@ -315,7 +317,9 @@ def main():
             budget_ratios, 
             args.wandb, 
             args.max_steps, 
-            wandb_run
+            wandb_run,
+            separate_classifier=False,
+            num_classes=345,
         )
     
     # Reset batch normalization statistics

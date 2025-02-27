@@ -60,7 +60,7 @@ def get_gradient_mask(perm_blocks, model_weights):
     return masks
 
 
-def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activations_model_1, activations_model_2, ip_dim=1, separate_classifier=False, merging='perm_gradmask', num_classes=1000, rn_18=False):
+def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activations_model_1, activations_model_2, ip_dim=1, separate_classifier=False, merging='perm_gradmask', num_classes=1000, model_type='rn50'):
     """
     Extract and process activations from two models for a given layer.
     
@@ -93,12 +93,14 @@ def get_model_orig_activations(model1, model2, perm_blocks, layer_name, activati
         bo1, bo2, bo1c, bo2c = output_perms
     except KeyError:
         if separate_classifier:
-            if not rn_18:
+            if model_type == 'rn50' or model_type == 'rn101':
                 bo1, bo2, bo1c, bo2c = torch.arange(2048), torch.arange(2048), torch.tensor([]), torch.tensor([])
-            elif rn_18 == 'rn20':
+            elif model_type == 'rn20':
                 bo1, bo2, bo1c, bo2c = torch.arange(1024), torch.arange(1024), torch.tensor([]), torch.tensor([])
-            else:
+            elif model_type == 'rn18':
                 bo1, bo2, bo1c, bo2c = torch.arange(512), torch.arange(512), torch.tensor([]), torch.tensor([])
+            else:
+                raise ValueError(f"Unknown model type: {model_type}")
         else:
             bo1, bo2, bo1c, bo2c = torch.arange(num_classes), torch.arange(num_classes), torch.tensor([]), torch.tensor([])
             
@@ -229,7 +231,7 @@ def capture_inputs(model, act_dict):
     return hook_handles
 
 
-def step(batch, model1, model2, model3_dict, m3_params, optimizer, perm_blocks, all_layer_loss, activations_model_1, activations_model_2, grad_masks=None, separate_classifier=False, merging='perm_gradmask', num_classes=1000, verbose=False, rn_18=False):
+def step(batch, model1, model2, model3_dict, m3_params, optimizer, perm_blocks, all_layer_loss, activations_model_1, activations_model_2, grad_masks=None, separate_classifier=False, merging='perm_gradmask', num_classes=1000, verbose=False, model_type='rn50'):
     """
     Perform a single optimization step for PLeaS merging.
     
@@ -268,7 +270,7 @@ def step(batch, model1, model2, model3_dict, m3_params, optimizer, perm_blocks, 
     total_loss = 0.
     for layer_name, layer in model3_dict.items():
         try:
-            acts_ip_stacked, acts_op_stacked = get_model_orig_activations(model1, model2, perm_blocks, layer_name, activations_model_1, activations_model_2, separate_classifier=separate_classifier, merging=merging, num_classes=num_classes, rn_18=rn_18)
+            acts_ip_stacked, acts_op_stacked = get_model_orig_activations(model1, model2, perm_blocks, layer_name, activations_model_1, activations_model_2, separate_classifier=separate_classifier, merging=merging, num_classes=num_classes, model_type=model_type)
         except KeyError:
             print(f"Key error on {layer_name}")
             continue
@@ -300,7 +302,7 @@ def step(batch, model1, model2, model3_dict, m3_params, optimizer, perm_blocks, 
     return total_loss
 
 
-def train(dataloader, model1, model2, model3, spec, perm, costs, budget_ratios, WANDB, MAX_STEPS, wandb_run, separate_classifier=False, merging='perm_gradmask', num_classes=1000, lr=5e-4, verbose=False, rn_18=False):
+def train(dataloader, model1, model2, model3, spec, perm, costs, budget_ratios, WANDB, MAX_STEPS, wandb_run, separate_classifier=False, merging='perm_gradmask', num_classes=1000, lr=5e-4, verbose=False, model_type='rn50'):
     """
     Train a merged model using the PLeaS algorithm.
     
@@ -368,7 +370,7 @@ def train(dataloader, model1, model2, model3, spec, perm, costs, budget_ratios, 
         if idx > MAX_STEPS: break
         
         # Perform optimization step
-        tracking_loss += step(batch, model1, model2, model3_dict, m3_params, optimizer, perm_blocks, all_layer_loss, activations_model_1, activations_model_2, grad_masks, separate_classifier, merging, num_classes, verbose=verbose, rn_18=rn_18)
+        tracking_loss += step(batch, model1, model2, model3_dict, m3_params, optimizer, perm_blocks, all_layer_loss, activations_model_1, activations_model_2, grad_masks, separate_classifier, merging, num_classes, verbose=verbose, model_type=model_type)
         if verbose: print(tracking_loss)
         lr_sched.step()
         
@@ -566,3 +568,18 @@ def train_eval_linear_probe(model, train_dataloader, test_dataloader, num_classe
     # Log evaluation results
     wandb_run.log({f"{dataset_name}_linear_probe_acc": acc.compute().item()})
     return fc
+
+
+
+def eval_whole_model(model, dataloader, num_classes):
+    # Simple eval loop
+    model.cuda()
+    model.eval()
+    acc = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
+    for batch in tqdm.tqdm(dataloader):
+        x, y = batch
+        x = x.cuda()
+        y_hat = model(x)
+        acc(y_hat.detach().cpu(), y)
+    print(acc.compute())
+    return acc.compute()

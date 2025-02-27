@@ -1,0 +1,51 @@
+wandb_version: 1
+
+model:
+  desc: null
+  value: rn50
+budget_ratio:
+  desc: null
+  value: 1.0
+merge type:
+  desc: null
+  value: pleas_weight
+d1:
+  desc: null
+  value: cub
+d2:
+  desc: null
+  value: nabird
+pretrained:
+  desc: null
+  value: v1a
+_wandb:
+  desc: null
+  value:
+    python_version: 3.11.5
+    cli_version: 0.16.2
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: true
+    start_time: 1740686223.189884
+    t:
+      1:
+      - 1
+      - 5
+      - 41
+      - 53
+      - 55
+      2:
+      - 1
+      - 5
+      - 41
+      - 53
+      - 55
+      3:
+      - 16
+      - 23
+      4: 3.11.5
+      5: 0.16.2
+      8:
+      - 2
+      - 5
+      13: linux-x86_64

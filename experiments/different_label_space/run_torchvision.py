@@ -26,7 +26,7 @@ from experiments.datasets.interface import get_train_test_loaders
 from experiments.configs.merge_configs import BUDGET_RATIOS
 
 # Configuration for experiments
-MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts')
+MODEL_PATH = os.environ.get('MODEL_PATH', '/gscratch/sewoong/anasery/rebasin_merging/PLeaS-Merging-Artifacts/models')
 
 
 def get_zip_ratios(initial_ratios, budget_ratio, base_budget_ratios):
@@ -65,7 +65,7 @@ def parse_args():
                         choices=["cub", "nabird", "oxford_pets", "stanford_dogs"],
                         help="Second dataset")
     parser.add_argument("--data_dir", type=str, default="/scr/",)
-    parser.add_argument("--model_type", type=str, default="rn18",
+    parser.add_argument("--model_type", type=str, default="rn50",
                         choices=["rn18", "rn50", "rn101"],
                         help="Model architecture")
     parser.add_argument("--variant1", type=str, default="v1a",
@@ -73,9 +73,9 @@ def parse_args():
     parser.add_argument("--variant2", type=str, default="v1b",
                         help="Variant of second model")
     
-    parser.add_argument("--merging", type=str, default="pleas",
-                        choices=["pleas", "weight_matching", "perm_gradmask", 
-                                "mean", "mean_eval_only", "perm_eval_only"],
+    parser.add_argument("--merging", type=str, default="pleas_weight",
+                        choices=["pleas_weight", "pleas_activation", "weight_matching", 
+                                 "perm_activation"],
                         help="Merging strategy")
     parser.add_argument("--budget_ratio", type=float, default=1.0,
                         help="Budget ratio for partial merging")
@@ -174,14 +174,15 @@ def main():
     print("Loading model checkpoints...")
     try:
         model_dict_1 = torch.load(
-            f"{MODEL_PATH}/{args.model_type}/{args.dataset1}_{args.variant1}.pth")
+            f"{MODEL_PATH}/{args.model_type}/{args.dataset1}/{args.variant1}/model.pth")
         model_dict_2 = torch.load(
-            f"{MODEL_PATH}/{args.model_type}/{args.dataset2}_{non_pt}.pth")
+            f"{MODEL_PATH}/{args.model_type}/{args.dataset2}/{non_pt}/model.pth")
         
         model1.load_state_dict(model_dict_1['model'])
         model2.load_state_dict(model_dict_2['model'])
-    except:
-        print("Error loading model checkpoints. Please check paths.")
+    except Exception as e:
+        print(f"Error loading model checkpoints - {e}")
+        print(f"The paths being used are - {MODEL_PATH}/{args.model_type}/{args.dataset1}/{args.variant1}/model.pth and {MODEL_PATH}/{args.model_type}/{args.dataset2}/{non_pt}/model.pth")
         return
     
     # Save the classifiers and replace them with identity
@@ -243,15 +244,9 @@ def main():
         model3 = partial_merge(spec, model1, model2, perm, costs, budget_ratios)
     model3.cuda()
     
-    # First evaluation (before PLeaS optimization)
-    print("Initial evaluation...")
-    for bidx, batch in enumerate(train_loader):
-        model3(batch[0].cuda())
-        if bidx > 100:
-            break
-    
+
     # Optimize with PLeaS if selected
-    if 'eval_only' not in args.merging:
+    if 'pleas' in args.merging:
         print("Training with PLeaS...")
         model3 = train(
             train_loader, 
@@ -265,8 +260,9 @@ def main():
             args.wandb, 
             args.max_steps, 
             wandb_run, 
-            merging=args.merging if 'perm' in args.merging else 'perm_gradmask',
-            rn_18=args.model_type == 'rn18',
+            merging='perm_gradmask',
+            separate_classifier=True,
+            model_type=args.model_type,
         )
     
     # Reset batch norm statistics

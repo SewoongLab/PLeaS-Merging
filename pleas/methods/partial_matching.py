@@ -73,7 +73,6 @@ def get_blocks(
     blocks = {}
     # Just tells which ones to keep merged and which ones to keep separate
     for axis, P in perm.items():
-        print(axis)
         if abs(ratios[axis] - 1.0) < 1e-3:
             # Special case, makes life easier for me later
             P = torch.arange(len(P))
