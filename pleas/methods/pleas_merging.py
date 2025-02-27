@@ -1,7 +1,6 @@
 import torch
 import torchmetrics
 import tqdm.auto as tqdm
-import wandb
 from copy import copy
 
 from pleas.core.utils import Axis

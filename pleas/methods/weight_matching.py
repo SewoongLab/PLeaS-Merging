@@ -6,20 +6,17 @@ from copy import copy, deepcopy
 from functools import wraps
 from typing import Union
 
-from utils import (
+from pleas.core.utils import (
     Permutation,
     PermutationSpec,
     StateDict,
     apply_perm,
-    lerp,
-    lslerp,
     make_identity_perm,
-    slerp,
-    tree_mean,
+
     
 )
-from lsa_solvers import scipy_solve_lsa
-from activation_matching import cross_features_inner_product
+from pleas.core.solvers import scipy_solve_lsa
+from .activation_matching import cross_features_inner_product
 
 
 def weight_matching(

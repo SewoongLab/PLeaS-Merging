@@ -14,7 +14,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx.node import Argument, Node, Target, map_aggregate, map_arg
 from torch.nn import functional as F
 
-from utils import (
+from .utils import (
     Axis,
     InputsOrShapes,
     PermutationGroup,
