@@ -216,12 +216,12 @@ def main():
     
     # Create train and test loaders
     train_loader1 = CustomImageFolder(
-        f"{args.data_dir}/domainnet/{args.domain1}/", 
-        f"{args.data_dir}/domainnet/train_images.txt", 
+        f"{args.data_dir}/{args.domain1}/", 
+        f"{args.data_dir}/{args.domain1}/train_images.txt", 
         inmemory=False, transform=train_transforms)
     train_loader2 = CustomImageFolder(
-        f"{args.data_dir}/domainnet/{args.domain2}/", 
-        f"{args.data_dir}/domainnet/{args.domain2}/train_images.txt", 
+        f"{args.data_dir}/{args.domain2}/", 
+        f"{args.data_dir}/{args.domain2}/train_images.txt", 
         inmemory=False, transform=train_transforms)
     
     train_loader = torch.utils.data.DataLoader(
@@ -231,8 +231,8 @@ def main():
     test_loaders = dict([
         (x, torch.utils.data.DataLoader(
             CustomImageFolder(
-                f"{args.data_dir}/domainnet/{x}/", 
-                f"{args.data_dir}/domainnet/{x}/test_images.txt", 
+                f"{args.data_dir}/{x}/", 
+                f"{args.data_dir}/{x}/test_images.txt", 
                 split_ratio=1.0, inmemory=False, transform=val_transforms), 
             batch_size=256)) 
         for x in ["clipart", "painting", "infograph", "real"]
@@ -249,7 +249,7 @@ def main():
             state_as=model1.state_dict(), 
             state_bs=model2.state_dict(), 
             max_iter=100, 
-            verbose=True, 
+            verbose=False, 
             seed=0, 
             return_costs=True
         )
@@ -264,7 +264,7 @@ def main():
         )
     
     # Count FLOPs and get terms
-    if not args.use_zip_ratios:
+    if not args.use_zip_ratios and args.model_type == 'rn50':
         R0 = np.load(
             "/gscratch/sewoong/jhayase/oh/git-re-basin/git-re-basin-fx/archive/rn50-layerwise-0.npy")
         R1 = np.load(
@@ -280,6 +280,8 @@ def main():
         orig_ratios = {k: 0.0 for k in spec.keys()}
 
         budget_ratios = get_zip_ratios(orig_ratios, args.budget_ratio, base_budget_ratios=BUDGET_RATIOS[args.model_type])
+
+    budget_ratios = {Axis(k, 0): v for k, v in budget_ratios.items()}
     
     # Process permutations based on merging strategy
     new_perm, new_costs = {}, {}
@@ -297,7 +299,7 @@ def main():
     print("Creating merged model...")
     if 'reg_mean' in args.merging:
         model3 = deepcopy(model1)
-    else:                    
+    else:     
         model3 = partial_merge(spec, model1, model2, new_perm, new_costs, budget_ratios)
     model3.cuda()
     

@@ -1,6 +1,6 @@
 # PLeaS: Merging Models with Permutations and Least Squares
 
-This repository contains the implementation for our paper "PLeaS - Merging Models with Permutations and Least Squares", which introduces a novel algorithm for parameter-efficient merging of neural networks.
+This repository contains the implementation for our CVPR'25 paper [PLeaS - Merging Models with Permutations and Least Squares](https://arxiv.org/abs/2407.02447), which introduces a novel algorithm for merging of neural networks.
 
 ## Overview
 
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 # Install the package in development mode
 pip install -e .
 ```
-Data is at - `s3://pleas-merging-artiacts-sewoonglab`
+
 ## Key Components
 
 ### 1. Git Re-Basin Implementation
@@ -76,8 +76,9 @@ perm, costs = activation_matching(
     output_costs=True,
 )
 
-# Partial merging with 50% computation budget
-budget_ratios = {key: 0.5 for key in spec.keys()}  # 50% computation budget
+# Create merging ratios
+# A ratio of 0.0 indicates complete merging, while 1.0 indicates no merging
+budget_ratios = {key: 0. for key in spec.keys()}  
 merged_model = partial_merge(
     spec, model1, model2, perm, costs, budget_ratios
 )
@@ -104,89 +105,157 @@ optimized_model = pleas_train(
 )
 ```
 
-### Evaluation with Linear Probes
-
-```python
-from pleas.methods.pleas_merging import train_eval_linear_probe
-
-# Train and evaluate linear probes on top of the merged model
-accuracy = train_eval_linear_probe(
-    optimized_model,
-    train_dataloader,
-    test_dataloader,
-    num_classes,
-    wandb_run,
-    dataset_name,
-    lr=1e-3,
-    epochs=10
-)
-```
-
 ## Running Experiments
 
-### DomainNet Experiments
+### Downloading Checkpoints
+
+To download model checkpoints from our S3 bucket (`s3://pleas-merging-artiacts-sewoonglab`):
 
 ```bash
-python -m experiments.domainnet.run_domainnet \
-    --domain1 clipart \
-    --domain2 real \
-    --model_type rn101 \
-    --variant1 v2a \
-    --variant2 v2b \
-    --merging pleas \
-    --budget_ratio 1.5 \
-    --wandb \
-    --output_dir ./outputs
+# Change to the scripts directory
+cd experiments/scripts
+
+# Default directory (./pretrained_models/)
+python download_checkpoints.py
+
+# Custom directory
+python download_checkpoints.py --output-dir /path/to/models
 ```
 
-### TorchVision Experiments
+Or use the shell wrapper:
 
 ```bash
-python -m experiments.torchvision.run_torchvision \
-    --dataset1 cub \
-    --dataset2 oxford_pets \
-    --model_type rn18 \
-    --variant1 v1a \
-    --variant2 v1b \
-    --merging pleas \
-    --budget_ratio 1.46 \
-    --wandb \
-    --output_dir ./outputs
+# Change to the scripts directory
+cd experiments/scripts
+
+# Make the shell script executable
+chmod +x download_checkpoints.sh
+
+# Default directory (./pretrained_models/)
+./download_checkpoints.sh
+
+# Custom directory
+./download_checkpoints.sh /path/to/models
 ```
 
-## Experiment Analysis
+The script will:
+1. Download model checkpoints from `s3://pleas-merging-artiacts-sewoonglab`
+2. Store them in the specified directory (defaults to `./pretrained_models/`)
+3. Set the `MODEL_CHECKPOINTS_DIR` environment variable for the current session
 
-We provide utilities for analyzing experiment results:
+### Requirements
+- AWS CLI must be installed and in your PATH
+- Python 3.x
 
-```python
-from experiments.utils.analysis import (
-    load_experiment_results,
-    plot_accuracy_vs_budget,
-    plot_method_comparison
-)
+### Environment Variable
 
-# Load results
-results = load_experiment_results("./outputs", "torchvision")
+To permanently set the `MODEL_CHECKPOINTS_DIR` environment variable:
 
-# Plot accuracy vs. budget ratio
-fig = plot_accuracy_vs_budget(results)
-fig.savefig("accuracy_vs_budget.png")
-
-# Compare methods at a specific budget
-fig = plot_method_comparison(results, budget_value=1.5)
-fig.savefig("method_comparison.png")
+**Linux/Mac:**
+```bash
+echo 'export MODEL_CHECKPOINTS_DIR="/absolute/path/to/models"' >> ~/.bashrc
+source ~/.bashrc
 ```
+
+**Windows:**
+```bash
+setx MODEL_CHECKPOINTS_DIR "C:\path\to\models"
+```
+
+This environment variable can be used in your code to reference the models directory.
+
+## Experiment Launcher Scripts
+
+The repository includes scripts to automate the launching of experiments with various configurations. These scripts are located in the `experiments/scripts` directory:
+
+### Different Label Space Experiments
+
+To launch a series of experiments for models trained on different label spaces:
+
+```bash
+# Make the script executable
+chmod +x ./scripts/launch_different_label_space_experiments.sh
+
+
+# Run with default settings (rn50 model)
+./scripts/launch_different_label_space_experiments.sh
+
+# Run with custom settings
+./scripts/launch_different_label_space_experiments.sh \
+  --data_dir "/path/to/data" \
+  --model_type "rn18" \
+  --merging "pleas_activation" \
+  --max_steps 800 \
+  --seed 100 \
+  --output_dir "./custom_outputs" \
+  --use_zip_ratios
+```
+
+This script will run experiments with the following configurations:
+- **Dataset pairs**: 
+  - cub and oxford_pets
+  - cub and stanford_dogs
+  - oxford_pets and nabird
+  - nabird and stanford_dogs
+  - cub and nabird
+  - stanford_dogs and oxford_pets
+- **Variant pairs**: (v1a,v1b) and (v1b,v1a)
+- **Budget ratios** (for rn50): 1.0, 1.2, 1.55, 1.8, 2.0
+
+### Shared Label Space Experiments
+
+To launch a series of experiments for models trained on shared label spaces:
+
+```bash
+# Make the script executable
+chmod +x ./scripts/launch_shared_label_space_experiments.sh
+
+# Run with default settings (rn50 model)
+./scripts/launch_shared_label_space_experiments.sh
+
+# Run with custom settings
+./scripts/launch_shared_label_space_experiments.sh \
+  --model_type "rn101" \
+  --merging "weight_matching" \
+  --use_zip_ratios
+```
+
+This script will run experiments with the following configurations:
+- **Domain pairs**: 
+  - clipart and painting
+  - clipart and infograph
+  - clipart and real
+  - painting and infograph
+  - painting and real
+  - infograph and real
+- **Variant pairs**: (v1a,v1b) and (v1b,v1a)
+- **Budget ratios** depend on the model type:
+  - rn18: 1.0, 1.24, 1.46, 1.71, 2.0
+  - rn50: 1.0, 1.2, 1.55, 1.8, 2.0 (default)
+  - rn101: 1.0, 1.1, 1.7, 1.8, 2.0
+
+### Features of Both Scripts
+
+- Logs all experiment commands and outputs to a timestamped log file
+- Creates separate output directories for each experiment
+- Enables Weights & Biases logging
+- Supports customization via command-line options
+- Shows experiment progress and counting
+
 
 ## Citation
 
 If you use this code in your research, please cite our paper:
 
 ```
-@article{pleas2025,
-  title={PLeaS - Merging Models with Permutations and Least Squares},
-  author={},
-  journal={},
-  year={2025}
+@misc{nasery2024pleasmergingmodels,
+      title={PLeaS -- Merging Models with Permutations and Least Squares}, 
+      author={Anshul Nasery and Jonathan Hayase and Pang Wei Koh and Sewoong Oh},
+      year={2024},
+      eprint={2407.02447},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2407.02447}, 
 }
 ```
 
