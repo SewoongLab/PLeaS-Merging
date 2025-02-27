@@ -117,9 +117,9 @@ def parse_args():
     parser.add_argument("--model_type", type=str, default="rn50",
                         choices=["rn18", "rn50", "rn101"],
                         help="Model architecture")
-    parser.add_argument("--variant1", type=str, default="v2a",
+    parser.add_argument("--variant1", type=str, default="v1a",
                         help="Variant of first model")
-    parser.add_argument("--variant2", type=str, default="v2b",
+    parser.add_argument("--variant2", type=str, default="v1b",
                         help="Variant of second model")
     parser.add_argument("--data_dir", type=str, default="/scr/",)
     
