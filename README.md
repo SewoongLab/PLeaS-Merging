@@ -4,9 +4,9 @@ This repository contains the implementation for our CVPR'25 paper [PLeaS - Mergi
 
 ## Overview
 
-Neural networks are not uniquely identified due to weight-space symmetries. Two networks with the same architecture but different weights might represent the same function if their weights differ only by permutations. This repository provides:
+This repository contains -
 
-1. **A modular implementation of Git Re-Basin** for finding permutations between neural networks using activation or weight matching
+1. **A modular implementation of [Git Re-Basin](https://arxiv.org/abs/2209.04836)** for finding permutations between neural networks using activation or weight matching
 2. **An extension to partial model merging** using permutation matching and budget constraints
 3. **Our novel PLeaS algorithm**, which optimizes merged models through least-squares training while respecting permutation structure
 4. **Scripts to reproduce our experiments** on various datasets for ResNet models.
