@@ -35,20 +35,25 @@ def check_aws_cli():
 def download_checkpoints(output_dir):
     """Download model checkpoints from S3 bucket."""
     s3_bucket = 's3://pleas-merging-artiacts-sewoonglab'
-    
+    endpoint = "https://s3.kopah.orci.washington.edu"
+    env = os.environ.copy()
+    env["AWS_S3_ADDRESSING_STYLE"] = "path"  # required for your endpoint
+
     # Create output directory if it doesn't exist
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
     print(f"Downloading model checkpoints from {s3_bucket} to {output_dir}...")
+    cmd = [
+        "aws", "s3", "sync",
+        s3_bucket,
+        output_dir,
+        "--no-sign-request",
+        "--endpoint-url", endpoint,
+    ]    
     
     # Use AWS CLI to download
     try:
-        subprocess.run([
-            'aws', 's3', 'sync', 
-            s3_bucket, 
-            output_dir,
-            '--no-sign-request'  # Use this flag if the bucket allows public access
-        ], check=True)
+        subprocess.run(cmd, check=True)
         print("Download completed successfully!")
         return True
     except subprocess.SubprocessError as e:
